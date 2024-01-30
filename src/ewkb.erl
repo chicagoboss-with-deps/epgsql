@@ -1,10 +1,5 @@
-%% @doc
-%% Encoder/decoder for PostGIS binary data representation.
-%%
-%% <ul>
-%%  <li>[https://en.wikipedia.org/wiki/Well-known_text]</li>
-%%  <li>[http://postgis.net/docs/manual-2.4/using_postgis_dbmanagement.html#EWKB_EWKT]</li>
-%% </ul>
+%% https://en.wikipedia.org/wiki/Well-known_text
+%% http://postgis.net/docs/manual-2.4/using_postgis_dbmanagement.html#EWKB_EWKT
 -module(ewkb).
 -export([decode_geometry/1, encode_geometry/1]).
 -export_type([point_type/0, point/1, multi_point/1, line_string/1,

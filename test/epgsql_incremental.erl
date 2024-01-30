@@ -6,11 +6,10 @@
 -module(epgsql_incremental).
 
 -export([connect/1, connect/2, connect/3, connect/4, close/1]).
--export([get_parameter/2, set_notice_receiver/2, get_cmd_status/1, get_backend_pid/1,
-         squery/2, equery/2, equery/3]).
+-export([get_parameter/2, set_notice_receiver/2, get_cmd_status/1, squery/2, equery/2, equery/3]).
 -export([prepared_query/3]).
 -export([parse/2, parse/3, parse/4, describe/2, describe/3]).
--export([bind/3, bind/4, execute/2, execute/3, execute/4, execute_batch/2, execute_batch/3]).
+-export([bind/3, bind/4, execute/2, execute/3, execute/4, execute_batch/2]).
 -export([close/2, close/3, sync/1]).
 
 -include("epgsql.hrl").
@@ -40,10 +39,7 @@ await_connect(Ref, Opts0) ->
         {C, Ref, connected} ->
             {ok, C};
         {_C, Ref, Error = {error, _}} ->
-            Error;
-        {epgsql, C, socket_passive} ->
-            ok = epgsql:activate(C),
-            await_connect(Ref, Opts0)
+            Error
     after Timeout ->
             error(timeout)
     end.
@@ -59,9 +55,6 @@ set_notice_receiver(C, PidOrName) ->
 
 get_cmd_status(C) ->
     epgsqli:get_cmd_status(C).
-
-get_backend_pid(C) ->
-    epgsqli:get_backend_pid(C).
 
 squery(C, Sql) ->
     Ref = epgsqli:squery(C, Sql),
@@ -83,14 +76,12 @@ equery(C, Sql, Parameters) ->
             Error
     end.
 
-prepared_query(C, #statement{types = Types} = Stmt, Parameters) ->
-    TypedParameters = lists:zip(Types, Parameters),
-    Ref = epgsqli:prepared_query(C, Stmt, TypedParameters),
-    receive_result(C, Ref, undefined);
 prepared_query(C, Name, Parameters) ->
     case describe(C, statement, Name) of
-        {ok, S} ->
-            prepared_query(C, S, Parameters);
+        {ok, #statement{types = Types} = S} ->
+            Typed_Parameters = lists:zip(Types, Parameters),
+            Ref = epgsqli:prepared_query(C, S, Typed_Parameters),
+            receive_result(C, Ref, undefined);
         Error ->
             Error
     end.
@@ -133,17 +124,6 @@ execute_batch(C, Batch) ->
     Ref = epgsqli:execute_batch(C, Batch),
     receive_extended_results(C, Ref, []).
 
-execute_batch(C, #statement{columns = Cols} = Stmt, Batch) ->
-    Ref = epgsqli:execute_batch(C, Stmt, Batch),
-    {Cols, receive_extended_results(C, Ref, [])};
-execute_batch(C, Sql, Batch) ->
-    case parse(C, Sql) of
-        {ok, #statement{} = S} ->
-            execute_batch(C, S, Batch);
-        Error ->
-            Error
-    end.
-
 %% statement/portal functions
 
 describe(C, #statement{name = Name}) ->
@@ -153,9 +133,9 @@ describe(C, statement, Name) ->
     Ref = epgsqli:describe(C, statement, Name),
     sync_on_error(C, receive_describe(C, Ref, #statement{name = Name}));
 
-describe(C, portal, Name) ->
-    Ref = epgsqli:describe(C, portal, Name),
-    sync_on_error(C, receive_describe_portal(C, Ref)).
+describe(C, Type, Name) ->
+    %% TODO unknown result format of Describe portal
+    epgsqli:describe(C, Type, Name).
 
 close(C, #statement{name = Name}) ->
     close(C, statement, Name).
@@ -203,9 +183,6 @@ receive_result(C, Ref, Cols, Rows) ->
             {ok, Cols, lists:reverse(Rows)};
         {C, Ref, done} ->
             done;
-        {epgsql, C, socket_passive} ->
-            ok = epgsql:activate(C),
-            receive_result(C, Ref, Cols, Rows);
         {'EXIT', C, _Reason} ->
             throw({error, closed})
     end.
@@ -235,9 +212,6 @@ receive_extended_result(C, Ref, Rows) ->
             {ok, lists:reverse(Rows)};
         {C, Ref, done} ->
             done;
-        {epgsql, C, socket_passive} ->
-            ok = epgsql:activate(C),
-            receive_extended_result(C, Ref, Rows);
         {'EXIT', C, _Reason} ->
             {error, closed}
     end.
@@ -252,24 +226,6 @@ receive_describe(C, Ref, Statement = #statement{}) ->
             {ok, Statement#statement{columns = []}};
         {C, Ref, Error = {error, _}} ->
             Error;
-        {epgsql, C, socket_passive} ->
-            ok = epgsql:activate(C),
-            receive_describe(C, Ref, Statement);
-        {'EXIT', C, _Reason} ->
-            {error, closed}
-    end.
-
-receive_describe_portal(C, Ref) ->
-    receive
-        {C, Ref, {columns, Columns}} ->
-            {ok, Columns};
-        {C, Ref, no_data} ->
-            {ok, []};
-        {C, Ref, Error = {error, _}} ->
-            Error;
-        {epgsql, C, socket_passive} ->
-            ok = epgsql:activate(C),
-            receive_describe_portal(C, Ref);
         {'EXIT', C, _Reason} ->
             {error, closed}
     end.
@@ -280,9 +236,6 @@ receive_atom(C, Ref, Receive, Return) ->
             Return;
         {C, Ref, Error = {error, _}} ->
             Error;
-        {epgsql, C, socket_passive} ->
-            ok = epgsql:activate(C),
-            receive_atom(C, Ref, Receive, Return);
         {'EXIT', C, _Reason} ->
             {error, closed}
     end.

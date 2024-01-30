@@ -1,10 +1,3 @@
-%% @doc Performs 2nd stage of
-%% <a href="https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY">
-%% extended query protocol.</a>
-%%
-%% Takes prepared `statement()' and bind-parameters for placeholders and produces
-%% query results.
-%% ```
 %% > Bind
 %% < BindComplete
 %% > Execute
@@ -14,8 +7,6 @@
 %% < CloseComplete
 %% > Sync
 %% < ReadyForQuery
-%% '''
-%% @see epgsql_cmd_parse
 -module(epgsql_cmd_equery).
 -behaviour(epgsql_command).
 -export([init/1, execute/2, handle_message/4]).
@@ -43,14 +34,15 @@ execute(Sock, #equery{stmt = Stmt, params = TypedParams} = St) ->
     Codec = epgsql_sock:get_codec(Sock),
     Bin1 = epgsql_wire:encode_parameters(TypedParams, Codec),
     Bin2 = epgsql_wire:encode_formats(Columns),
-    Commands =
+    epgsql_sock:send_multi(
+      Sock,
       [
-       epgsql_wire:encode_bind("", StatementName, Bin1, Bin2),
-       epgsql_wire:encode_execute("", 0),
-       epgsql_wire:encode_close(statement, StatementName),
-       epgsql_wire:encode_sync()
-      ],
-    {send_multi, Commands, Sock, St}.
+       {?BIND, ["", 0, StatementName, 0, Bin1, Bin2]},
+       {?EXECUTE, ["", 0, <<0:?int32>>]},
+       {?CLOSE, [?PREPARED_STATEMENT, StatementName, 0]},
+       {?SYNC, []}
+      ]),
+    {ok, Sock, St}.
 
 handle_message(?BIND_COMPLETE, <<>>, Sock, #equery{stmt = Stmt} = State) ->
     #statement{columns = Columns} = Stmt,

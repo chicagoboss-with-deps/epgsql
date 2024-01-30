@@ -1,6 +1,6 @@
 -module(epgsql_SUITE).
 
--include_lib("stdlib/include/assert.hrl").
+-include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 -include_lib("public_key/include/public_key.hrl").
 -include("epgsql_tests.hrl").
@@ -15,10 +15,7 @@
     end_per_suite/1
 ]).
 
-%% logger handler
--export([log/2]).
-
--compile([export_all, nowarn_export_all]).
+-compile(export_all).
 
 modules() ->
     [
@@ -34,10 +31,9 @@ all() ->
     [{group, M} || M <- modules()].
 
 groups() ->
-    SubGroups = [
-        {connect, [parallel], [
+    Groups = [
+        {connect, [parrallel], [
             connect,
-            connect_with_application_name,
             connect_to_db,
             connect_as,
             connect_with_cleartext,
@@ -45,16 +41,10 @@ groups() ->
             connect_with_scram,
             connect_with_invalid_user,
             connect_with_invalid_password,
-            connect_to_invalid_database,
-            connect_with_other_error,
             connect_with_ssl,
-            cancel_query_for_connection_with_ssl,
-            cancel_query_for_connection_with_gen_tcp,
             connect_with_client_cert,
-            connect_with_invalid_client_cert,
             connect_to_closed_port,
-            connect_map,
-            connect_proplist
+            connect_map
         ]},
         {types, [parallel], [
             numeric_type,
@@ -73,21 +63,10 @@ groups() ->
             range_type,
             range8_type,
             date_time_range_type,
-            custom_types,
-            custom_null
-        ]},
-        {pipelining, [parallel], [
-            pipelined_prepared_query,
-            pipelined_parse_batch_execute
-        ]},
-        {incremental_sock_active, [parallel], [
-            incremental_sock_active_n,
-            incremental_sock_active_n_ssl
+            custom_types
         ]},
         {generic, [parallel], [
-            with_transaction,
-            mixed_api,
-            redacted_state
+            with_transaction
         ]}
     ],
 
@@ -104,9 +83,6 @@ groups() ->
         cursor,
         multiple_result,
         execute_batch,
-        execute_batch_3_named_stmt,
-        execute_batch_3_unnamed_stmt,
-        execute_batch_3_sql,
         batch_error,
         single_batch,
         extended_select,
@@ -128,7 +104,6 @@ groups() ->
         describe_with_param,
         describe_named,
         describe_error,
-        describe_portal,
         portal,
         returning,
         multiple_statement,
@@ -147,13 +122,14 @@ groups() ->
         listen_notify,
         listen_notify_payload,
         set_notice_receiver,
-        get_cmd_status,
-        get_backend_pid
+        get_cmd_status
     ],
-    SubGroups ++
-        [{epgsql, [], [{group, generic} | Tests]},
-         {epgsql_cast, [], [{group, pipelining} | Tests]},
-         {epgsql_incremental, [], [{group, incremental_sock_active} | Tests]}].
+    Groups ++ [case Module of
+                   epgsql ->
+                       {Module, [], [{group, generic} | Tests]};
+                   _ ->
+                       {Module, [], Tests}
+               end || Module <- modules()].
 
 end_per_suite(_Config) ->
     ok.
@@ -185,16 +161,6 @@ end_per_group(_GroupName, _Config) ->
                  {routine, _} | _]
         }}).
 
--define(QUERY_CANCELED, {error, #error{
-        severity = error,
-        code = <<"57014">>,
-        codename = query_canceled,
-        message = <<"canceling statement due to user request">>,
-        extra = [{file, <<"postgres.c">>},
-                 {line, _},
-                 {routine, _} | _]
-        }}).
-
 %% From uuid.erl in http://gitorious.org/avtobiff/erlang-uuid
 uuid_to_bin_string(<<U0:32, U1:16, U2:16, U3:16, U4:48>>) ->
     iolist_to_binary(io_lib:format(
@@ -203,18 +169,6 @@ uuid_to_bin_string(<<U0:32, U1:16, U2:16, U3:16, U4:48>>) ->
 
 connect(Config) ->
     epgsql_ct:connect_only(Config, []).
-
-connect_with_application_name(Config) ->
-    Module = ?config(module, Config),
-    Fun = fun(C) ->
-              Query = "select application_name from pg_stat_activity",
-              {ok, _Columns, Rows} = Module:equery(C, Query),
-              ?assert(lists:member({<<"app_test">>}, Rows))
-          end,
-    epgsql_ct:with_connection(Config,
-                              Fun,
-                              "epgsql_test",
-                              [{application_name, "app_test"}]).
 
 connect_to_db(Connect) ->
     epgsql_ct:connect_only(Connect, [{database, "epgsql_test_db1"}]).
@@ -275,30 +229,6 @@ connect_with_invalid_password(Config) ->
         invalid_password                    -> ok  % >= 9.0
     end.
 
-connect_to_invalid_database(Config) ->
-    {Host, Port} = epgsql_ct:connection_data(Config),
-    Module = ?config(module, Config),
-    ?assertMatch(
-       {error, invalid_authorization_specification},
-       Module:connect(
-        Host,
-        "epgsql_test_md5",
-        "epgsql_test_md5",
-        [{port, Port}, {database, "epgsql_test_invalid_db"}])).
-
-connect_with_other_error(Config) ->
-    {Host, Port} = epgsql_ct:connection_data(Config),
-    Module = ?config(module, Config),
-    ?assertMatch(
-       {error,
-        #error{severity = fatal,
-               codename = protocol_violation}},
-       Module:connect(
-        Host,
-        <<0, 0>>,
-        "epgsql_test_invalid",
-        [{port, Port}, {database, <<0, 0>>}])).
-
 connect_with_ssl(Config) ->
     Module = ?config(module, Config),
     epgsql_ct:with_connection(Config,
@@ -306,66 +236,13 @@ connect_with_ssl(Config) ->
              {ok, _Cols, [{true}]} = Module:equery(C, "select ssl_is_used()")
         end,
         "epgsql_test",
-        [{ssl, true}, {ssl_opts, [{verify, verify_none}]}]).
-
-cancel_query_for_connection_with_ssl(Config) ->
-    Module = ?config(module, Config),
-    {Host, Port} = epgsql_ct:connection_data(Config),
-    Module = ?config(module, Config),
-    Args2 = [ {port, Port}, {database, "epgsql_test_db1"}
-            | [ {ssl, true}
-              , {ssl_opts, [{verify, verify_none}]}
-              , {timeout, 1000} ]
-            ],
-    {ok, C} = Module:connect(Host, "epgsql_test", Args2),
-    ?assertMatch({ok, _Cols, [{true}]},
-                Module:equery(C, "select ssl_is_used()")),
-    Self = self(),
-    spawn_link(fun() ->
-                   ?assertMatch(?QUERY_CANCELED, Module:equery(C, "SELECT pg_sleep(5)")),
-                   Self ! done
-               end),
-    %% this timer is needed for the test not to be flaky
-    timer:sleep(1000),
-    epgsql:cancel(C),
-    receive done ->
-        ?assert(true)
-    after 5000 ->
-        epgsql:close(C),
-        ?assert(false)
-    end,
-    epgsql_ct:flush().
-
-cancel_query_for_connection_with_gen_tcp(Config) ->
-    Module = ?config(module, Config),
-    {Host, Port} = epgsql_ct:connection_data(Config),
-    Module = ?config(module, Config),
-    Args2 = [ {port, Port}, {database, "epgsql_test_db1"}
-            | [ {timeout, 1000} ]
-            ],
-    {ok, C} = Module:connect(Host, "epgsql_test", Args2),
-    process_flag(trap_exit, true),
-    Self = self(),
-    spawn_link(fun() ->
-                   ?assertMatch(?QUERY_CANCELED, Module:equery(C, "SELECT pg_sleep(5)")),
-                   Self ! done
-               end),
-    %% this timer is needed for the test not to be flaky
-    timer:sleep(1000),
-    epgsql:cancel(C),
-    receive done ->
-        ?assert(true)
-    after 5000 ->
-        epgsql:close(C),
-        ?assert(false)
-    end,
-    epgsql_ct:flush().
+        [{ssl, true}]).
 
 connect_with_client_cert(Config) ->
     Module = ?config(module, Config),
     Dir = filename:join(code:lib_dir(epgsql), ?TEST_DATA_DIR),
     File = fun(Name) -> filename:join(Dir, Name) end,
-    {ok, Pem} = file:read_file(File("client.crt")),
+    {ok, Pem} = file:read_file(File("epgsql.crt")),
     [{'Certificate', Der, not_encrypted}] = public_key:pem_decode(Pem),
     Cert = public_key:pkix_decode_cert(Der, plain),
     #'TBSCertificate'{serialNumber = Serial} = Cert#'Certificate'.tbsCertificate,
@@ -373,51 +250,12 @@ connect_with_client_cert(Config) ->
 
     epgsql_ct:with_connection(Config,
          fun(C) ->
-             ?assertMatch({ok, _, [{true}]}, Module:equery(C, "select ssl_is_used()")),
-             ?assertMatch({ok, _, [{Serial2}]}, Module:equery(C, "select ssl_client_serial()"))
+             {ok, _, [{true}]} = Module:equery(C, "select ssl_is_used()"),
+             {ok, _, [{Serial2}]} = Module:equery(C, "select ssl_client_serial()")
          end,
          "epgsql_test_cert",
-        [{ssl, true}, {ssl_opts, [{keyfile, File("client.key")},
-                                  {certfile, File("client.crt")},
-                                  {verify, verify_none}]}]).
-
-connect_with_invalid_client_cert(Config) ->
-    {Host, Port} = epgsql_ct:connection_data(Config),
-    Module = ?config(module, Config),
-    Dir = filename:join(code:lib_dir(epgsql), ?TEST_DATA_DIR),
-    File = fun(Name) -> filename:join(Dir, Name) end,
-    Trap = process_flag(trap_exit, true),
-    %% pre-otp23:
-    %% {error,
-    %%   {ssl_negotiation_failed,
-    %%     {tls_alert,
-    %%       {unknown_ca, "received SERVER ALERT: Fatal - Unknown CA"}}}}
-    %% otp23+:
-    %% {error,
-    %%   {sock_error,
-    %%     {tls_alert,
-    %%       {unknown_ca, "TLS client: <..> received SERVER ALERT: Fatal - Unknown CA\n"}}}}
-    ?assertMatch(
-       {error, {Err, {tls_alert, _}}} when Err == ssl_negotiation_failed;
-                                           Err == sock_error,
-       Module:connect(
-         #{username => "epgsql_test_cert",
-           database => "epgsql_test_db1",
-           host => Host,
-           port => Port,
-           ssl => true,
-           ssl_opts =>
-               [{keyfile, File("bad-client.key")},
-                {certfile, File("bad-client.crt")},
-                {verify, verify_none},
-                %% TLS-1.3 seems to connect fine, but then sends alert asynchronously
-                {versions, ['tlsv1.2']}
-               ]}
-        )),
-    ?assertMatch({'EXIT', _, {Err, {tls_alert, _}}} when Err == ssl_negotiation_failed;
-                                                         Err == sock_error,
-                 receive Stop -> Stop end),
-    process_flag(trap_exit, Trap).
+        [{ssl, true}, {ssl_opts, [{keyfile, File("epgsql.key")},
+                                  {certfile, File("epgsql.crt")}]}]).
 
 connect_map(Config) ->
     {Host, Port} = epgsql_ct:connection_data(Config),
@@ -430,22 +268,6 @@ connect_map(Config) ->
         username => "epgsql_test_md5",
         password => "epgsql_test_md5"
     },
-    {ok, C} = Module:connect(Opts),
-    Module:close(C),
-    epgsql_ct:flush(),
-    ok.
-
-connect_proplist(Config) ->
-    {Host, Port} = epgsql_ct:connection_data(Config),
-    Module = ?config(module, Config),
-
-    Opts = [
-        {host, Host},
-        {port, Port},
-        {database, "epgsql_test_db1"},
-        {username, "epgsql_test_md5"},
-        {password, "epgsql_test_md5"}
-    ],
     {ok, C} = Module:connect(Opts),
     Module:close(C),
     epgsql_ct:flush(),
@@ -467,13 +289,11 @@ connect_to_closed_port(Config) ->
 prepared_query(Config) ->
     Module = ?config(module, Config),
     epgsql_ct:with_connection(Config, fun(C) ->
-        {ok, Stmt} = Module:parse(C, "inc", "select $1+1", []),
+        {ok, _} = Module:parse(C, "inc", "select $1+1", []),
         {ok, Cols, [{5}]} = Module:prepared_query(C, "inc", [4]),
         {ok, Cols, [{2}]} = Module:prepared_query(C, "inc", [1]),
         {ok, Cols, [{23}]} = Module:prepared_query(C, "inc", [22]),
-        {ok, Cols, [{34}]} = Module:prepared_query(C, Stmt, [33]),
-        {error, #error{codename = invalid_sql_statement_name}} =
-            Module:prepared_query(C, "non_existent_query", [4])
+        {error, _} = Module:prepared_query(C, "non_existent_query", [4])
     end).
 
 select(Config) ->
@@ -533,14 +353,8 @@ cursor(Config) ->
 multiple_result(Config) ->
     Module = ?config(module, Config),
     epgsql_ct:with_connection(Config, fun(C) ->
-        Module:squery(C, "delete test_table1 where id = 3;"),
         [{ok, _, [{<<"1">>}]}, {ok, _, [{<<"2">>}]}] = Module:squery(C, "select 1; select 2"),
-        [{ok, _, [{<<"1">>}]}, {error, #error{}}] = Module:squery(C, "select 1; select foo;"),
-        [{ok, _, [{<<"one">>}]}, {ok, 1}, {ok, 1}] =
-             Module:squery(C,
-                 "select value from test_table1 where id = 1; "
-                 "insert into test_table1 (id, value) values (3, 'three');"
-                 "delete from test_table1 where id = 3;")
+        [{ok, _, [{<<"1">>}]}, {error, #error{}}] = Module:squery(C, "select 1; select foo;")
     end).
 
 execute_batch(Config) ->
@@ -552,45 +366,17 @@ execute_batch(Config) ->
             Module:execute_batch(C, [{S1, [1]}, {S2, [1, 2]}])
     end).
 
-execute_batch_3_named_stmt(Config) ->
-    Module = ?config(module, Config),
-    epgsql_ct:with_connection(Config, fun(C) ->
-        {ok, Stmt} = Module:parse(C, "my_stmt", "select $1 + $2", [int4, int4]),
-        ?assertMatch(
-           {[#column{type = int4, _ = _}], [{ok, [{3}]}, {ok, [{7}]}]},
-           Module:execute_batch(C, Stmt, [[1, 2], [3, 4]]))
-    end).
-
-execute_batch_3_unnamed_stmt(Config) ->
-    Module = ?config(module, Config),
-    epgsql_ct:with_connection(Config, fun(C) ->
-        {ok, Stmt} = Module:parse(C, "select $1::integer + $2::integer"),
-        ?assertMatch(
-           {[#column{type = int4, _ = _}], [{ok, [{3}]}, {ok, [{7}]}]},
-           Module:execute_batch(C, Stmt, [[2, 1], [4, 3]]))
-    end).
-
-execute_batch_3_sql(Config) ->
-    Module = ?config(module, Config),
-    epgsql_ct:with_connection(Config, fun(C) ->
-        ?assertMatch(
-           {[#column{type = int4, _ = _}], [{ok, [{3}]}, {ok, [{7}]}]},
-           Module:execute_batch(C, "select $1::integer + $2::integer", [[1, 2], [3, 4]]))
-    end).
-
 batch_error(Config) ->
     Module = ?config(module, Config),
     epgsql_ct:with_rollback(Config, fun(C) ->
         {ok, S} = Module:parse(C, "insert into test_table1(id, value) values($1, $2)"),
-        [{ok, 1}, {error, Error}] =
+        [{ok, 1}, {error, _}] =
             Module:execute_batch(
               C,
               [{S, [3, "batch_error 3"]},
                {S, [2, "batch_error 2"]}, % duplicate key error
-               {S, [5, "batch_error 5"]},  % won't be executed
-               {S, [6, "batch_error 6"]}  % won't be executed
-              ]),
-        ?assertMatch(#error{}, Error)
+               {S, [5, "batch_error 5"]}  % won't be executed
+              ])
     end).
 
 single_batch(Config) ->
@@ -663,9 +449,9 @@ parse_column_format(Config) ->
     Module = ?config(module, Config),
     epgsql_ct:with_connection(Config, fun(C) ->
         {ok, S} = Module:parse(C, "select 1::int4, false::bool, 2.0::float4"),
-        [#column{type = int4, table_oid = 0, table_attr_number = 0},
-         #column{type = bool, table_oid = 0, table_attr_number = 0},
-         #column{type = float4, table_oid = 0, table_attr_number = 0}] = S#statement.columns,
+        [#column{type = int4},
+         #column{type = bool},
+         #column{type = float4}] = S#statement.columns,
         ok = Module:bind(C, S, []),
         {ok, [{1, false, 2.0}]} = Module:execute(C, S, 0),
         ok = Module:close(C, S),
@@ -801,23 +587,6 @@ describe_error(Config) ->
 
     end).
 
-describe_portal(Config) ->
-    Module = ?config(module, Config),
-    epgsql_ct:with_connection(Config, fun(C) ->
-        {ok, Stmt} = Module:parse(C, "my_stmt", "select * from test_table1 WHERE id = $1", []),
-        ok = Module:bind(C, Stmt, "my_portal", [1]),
-        {ok, Columns} = Module:describe(C, portal, "my_portal"),
-        ?assertMatch(
-           [#column{name = <<"id">>,
-                    type = int4},
-            #column{name = <<"value">>,
-                    type = text}],
-           Columns
-          ),
-        ok = Module:close(C, Stmt),
-        ok = Module:sync(C)
-    end).
-
 portal(Config) ->
     Module = ?config(module, Config),
     epgsql_ct:with_connection(Config, fun(C) ->
@@ -898,25 +667,7 @@ numeric_type(Config) ->
     check_type(Config, float4, "1.0", 1.0, [0.0, 1.23456, -1.23456]),
     check_type(Config, float4, "'-Infinity'", minus_infinity, [minus_infinity, plus_infinity, nan]),
     check_type(Config, float8, "1.0", 1.0, [0.0, 1.23456789012345, -1.23456789012345]),
-    check_type(Config, float8, "'nan'", nan, [minus_infinity, plus_infinity, nan]),
-    %% Check overflow protection. Connection just crashes for now instead of silently
-    %% truncating the data. Some cleaner behaviour can be introduced later.
-    epgsql_ct:with_connection(Config, fun(C) ->
-        Module = ?config(module, Config),
-        Trap = process_flag(trap_exit, true),
-        try Module:equery(C, "SELECT $1::int2", [32768]) of
-          {error, closed} ->
-                %% epgsqla/epgsqli
-                ok
-        catch exit:Reason ->
-                %% epgsql
-                ?assertMatch({{{integer_overflow, int2, _}, _}, _}, Reason),
-                receive {'EXIT', C, _} -> ok
-                after 1000 -> error(timeout)
-                end
-        end,
-        process_flag(trap_exit, Trap)
-    end).
+    check_type(Config, float8, "'nan'", nan, [minus_infinity, plus_infinity, nan]).
 
 character_type(Config) ->
     Alpha = unicode:characters_to_binary([16#03B1]),
@@ -1012,31 +763,16 @@ date_time_type(Config) ->
     end).
 
 json_type(Config) ->
-    Module = ?config(module, Config),
-    epgsql_ct:with_connection(Config, fun(C) ->
-        check_type(Config, json, "'{}'", <<"{}">>,
-                [<<"{}">>, <<"[]">>, <<"1">>, <<"1.0">>, <<"true">>, <<"\"string\"">>, <<"{\"key\": []}">>],
-                get_type_col(json), C),
-        check_type(Config, jsonb, "'{}'", <<"{}">>,
-                [<<"{}">>, <<"[]">>, <<"1">>, <<"1.0">>, <<"true">>, <<"\"string\"">>, <<"{\"key\": []}">>],
-                get_type_col(jsonb), C),
-        epgsql:update_type_cache(C, [{epgsql_codec_json, epgsql_fake_json_mod}]),
-        RowId = "json_type_custom_mod_" ++ atom_to_list(Module),
-        {ok, 1} = Module:equery(C, "insert into test_table2 (c_varchar, c_json, c_jsonb) values ($1, $2, $3)", [RowId, {"{}"}, {"{}"}]),
-        Res = Module:equery(C, "select c_json, c_jsonb from test_table2 where c_varchar = $1", [RowId]),
-        ?assertMatch(
-            {ok, [#column{name = <<"c_json">>, type = json}, #column{name = <<"c_jsonb">>, type = jsonb}],
-                 [{{<<"{}">>}, {<<"{}">>}}]},
-            Res
-        )
-    end).
+    check_type(Config, json, "'{}'", <<"{}">>,
+               [<<"{}">>, <<"[]">>, <<"1">>, <<"1.0">>, <<"true">>, <<"\"string\"">>, <<"{\"key\": []}">>]),
+    check_type(Config, jsonb, "'{}'", <<"{}">>,
+               [<<"{}">>, <<"[]">>, <<"1">>, <<"1.0">>, <<"true">>, <<"\"string\"">>, <<"{\"key\": []}">>]).
 
 misc_type(Config) ->
     check_type(Config, bool, "true", true, [true, false]),
     check_type(Config, bytea, "E'\001\002'", <<1,2>>, [<<>>, <<0,128,255>>]).
 
 hstore_type(Config) ->
-    Module = ?config(module, Config),
     Values = [
         {[]},
         {[{null, null}]},
@@ -1052,42 +788,7 @@ hstore_type(Config) ->
     check_type(Config, hstore, "''", {[]}, []),
     check_type(Config, hstore,
                "'a => 1, b => 2.0, c => null'",
-               {[{<<"a">>, <<"1">>}, {<<"b">>, <<"2.0">>}, {<<"c">>, null}]}, Values),
-    epgsql_ct:with_connection(
-      Config,
-      fun(C) ->
-              %% Maps as input
-              [begin
-                   {ok, _, [{Res}]} = Module:equery(C, "select $1::hstore", [maps:from_list(KV)]),
-                   ?assert(compare(hstore, Res, Jiffy))
-               end || {KV} = Jiffy <- Values],
-              %% Maps as output
-              {ok, [hstore]} = epgsql:update_type_cache(
-                                 C, [{epgsql_codec_hstore, #{return => map}}]),
-              [begin
-                   {ok, _, [{Res}]} = Module:equery(C, "select $1::hstore", [maps:from_list(KV)]),
-                   HstoreMap = maps:from_list([{format_hstore_key(K), format_hstore_value(V)} || {K, V} <- KV]),
-                   ?assertEqual(HstoreMap, Res)
-               end || {KV} <- Values],
-              %% Proplist as output
-              {ok, [hstore]} = epgsql:update_type_cache(
-                                 C, [{epgsql_codec_hstore, #{return => proplist}}]),
-              [begin
-                   {ok, _, [{Res}]} = Module:equery(C, "select $1::hstore", [Jiffy]),
-                   HstoreProplist = [{format_hstore_key(K), format_hstore_value(V)} || {K, V} <- KV],
-                   ?assertEqual(lists:sort(HstoreProplist), lists:sort(Res))
-               end || {KV} = Jiffy <- Values],
-              %% Custom nulls
-              Nulls = [nil, 'NULL', aaaa],
-              {ok, [hstore]} = epgsql:update_type_cache(
-                                 C, [{epgsql_codec_hstore, #{return => map,
-                                                             nulls => Nulls}}]),
-              K = <<"k">>,
-              [begin
-                   {ok, _, [{Res}]} = Module:equery(C, "select $1::hstore", [#{K => V}]),
-                   ?assertEqual(#{K => nil}, Res)
-               end || V <- Nulls]
-      end).
+               {[{<<"a">>, <<"1">>}, {<<"b">>, <<"2.0">>}, {<<"c">>, null}]}, Values).
 
 net_type(Config) ->
     check_type(Config, cidr, "'127.0.0.1/32'", {{127,0,0,1}, 32}, [{{127,0,0,1}, 32}, {{0,0,0,0,0,0,0,1}, 128}]),
@@ -1104,24 +805,18 @@ array_type(Config) ->
         {ok, _, [{[1, 2]}]} = Module:equery(C, "select ($1::int[])[1:2]", [[1, 2, 3]]),
         {ok, _, [{[{1, <<"one">>}, {2, <<"two">>}]}]} =
             Module:equery(C, "select Array(select (id, value) from test_table1)", []),
-        {ok, _, [{ [[1], [null], [3], [null]] }]} =
-            Module:equery(C, "select $1::int2[]", [ [[1], [null], [3], [undefined]] ]),
-        Select = fun(Type, AIn) ->
+        Select = fun(Type, A) ->
             Query = "select $1::" ++ atom_to_list(Type) ++ "[]",
-            {ok, _Cols, [{AOut}]} = Module:equery(C, Query, [AIn]),
-            case lists:all(fun({VIn, VOut}) ->
-                                   compare(Type, VIn, VOut)
-                           end, lists:zip(AIn, AOut)) of
+            {ok, _Cols, [{A2}]} = Module:equery(C, Query, [A]),
+            case lists:all(fun({V, V2}) -> compare(Type, V, V2) end, lists:zip(A, A2)) of
                 true  -> ok;
-                false -> ?assertEqual(AIn, AOut)
+                false -> ?assertMatch(A, A2)
             end
         end,
         Select(int2,   []),
         Select(int2,   [1, 2, 3, 4]),
         Select(int2,   [[1], [2], [3], [4]]),
         Select(int2,   [[[[[[1, 2]]]]]]),
-        Select(int2,   [1, null, 3, undefined]),
-        Select(int2,   [[1], [null], [3], [null]]),
         Select(bool,   [true]),
         Select(char,   [$a, $b, $c]),
         Select(int4,   [[1, 2]]),
@@ -1162,10 +857,7 @@ record_type(Config) ->
         Select("select (1, '{2,3}'::int[])", {{1, [2, 3]}}),
 
         %% Array of records inside record
-        Select("select (0, ARRAY(select (id, value) from test_table1))", {{0,[{1,<<"one">>},{2,<<"two">>}]}}),
-
-        %% Record with NULLs
-        Select("select (1, NULL::integer, 2)", {{1, null, 2}})
+        Select("select (0, ARRAY(select (id, value) from test_table1))", {{0,[{1,<<"one">>},{2,<<"two">>}]}})
     end).
 
 custom_types(Config) ->
@@ -1181,33 +873,6 @@ custom_types(Config) ->
         {ok, 1} = Module:execute(C, S),
         ?assertMatch({ok, _, [{bar}]}, Module:equery(C, "SELECT col FROM t_foo"))
     end).
-
-custom_null(Config) ->
-    Module = ?config(module, Config),
-    epgsql_ct:with_connection(Config, fun(C) ->
-        Test3 = fun(Type, In, Out) ->
-                        Q = ["SELECT $1::", Type],
-                        {ok, _, [{Res}]} = Module:equery(C, Q, [In]),
-                        ?assertEqual(Out, Res)
-                end,
-        Test = fun(Type, In) ->
-                       Test3(Type, In, In)
-               end,
-        Test("int2", nil),
-        Test3("int2", 'NULL', nil),
-        Test("text", nil),
-        Test3("text", 'NULL', nil),
-        Test3("text", null, <<"null">>),
-        Test("int2[]", [nil, 1, nil, 2]),
-        Test3("text[]", [null, <<"ok">>], [<<"null">>, <<"ok">>]),
-        Test3("int2[]", ['NULL', 1, nil, 2], [nil, 1, nil, 2]),
-        Test("int2[]", [[nil], [1], [nil], [2]]),
-        Test3("int2[]", [['NULL'], [1], [nil], [2]], [[nil], [1], [nil], [2]]),
-        ?assertMatch(
-           {ok, _, [{ {1, nil, {2, nil, 3}} }]},
-           Module:equery(C, "SELECT (1, NULL, (2, NULL, 3))", []))
-    end,
-    [{nulls, [nil, 'NULL']}]).
 
 text_format(Config) ->
     Module = ?config(module, Config),
@@ -1282,7 +947,7 @@ connection_closed_by_server(Config) ->
                     {'EXIT', C2, {shutdown, #error{code = <<"57P01">>}}} ->
                         P ! ok;
                     Other ->
-                        ct:pal("Unexpected msg: ~p~n", [Other]),
+                        ?debugFmt("Unexpected msg: ~p~n", [Other]),
                         P ! error
                 end
             end)
@@ -1437,21 +1102,12 @@ get_cmd_status(Config) ->
         ?assertEqual({ok, 'commit'}, Module:get_cmd_status(C))
     end).
 
-get_backend_pid(Config) ->
-    Module = ?config(module, Config),
-    epgsql_ct:with_connection(Config, fun(C) ->
-        {ok, [#column{}], [{PidBin}]} = Module:squery(C, "SELECT pg_backend_pid()"),
-        Pid = Module:get_backend_pid(C),
-        ?assertEqual(PidBin, integer_to_binary(Pid))
-    end).
-
 range_type(Config) ->
     epgsql_ct:with_min_version(Config, [9, 2], fun(_C) ->
         check_type(Config, int4range, "int4range(10, 20)", {10, 20}, [
             {1, 58}, {-1, 12}, {-985521, 5412687}, {minus_infinity, 0},
             {984655, plus_infinity}, {minus_infinity, plus_infinity}
-        ]),
-        check_type(Config, int4range, "int4range(10, 10)", empty, [])
+        ])
    end, []).
 
 range8_type(Config) ->
@@ -1460,26 +1116,17 @@ range8_type(Config) ->
             {1, 58}, {-1, 12}, {-9223372036854775808, 5412687},
             {minus_infinity, 9223372036854775807},
             {984655, plus_infinity}, {minus_infinity, plus_infinity}
-        ]),
-        check_type(Config, int8range, "int8range(10, 10)", empty, [])
+        ])
     end, []).
 
 date_time_range_type(Config) ->
     epgsql_ct:with_min_version(Config, [9, 2], fun(_C) ->
         check_type(Config, tsrange, "tsrange('2008-01-02 03:04:05', '2008-02-02 03:04:05')", {{{2008,1,2},{3,4,5.0}}, {{2008,2,2},{3,4,5.0}}}, []),
-        check_type(Config, tsrange, "tsrange('2008-01-02 03:04:05', '2008-02-02 03:04:05', '[]')", {{{2008,1,2},{3,4,5.0}}, {{2008,2,2},{3,4,5.0}}}, []),
-        check_type(Config, tsrange, "tsrange('2008-01-02 03:04:05', '2008-02-02 03:04:05', '()')", {{{2008,1,2},{3,4,5.0}}, {{2008,2,2},{3,4,5.0}}}, []),
-        check_type(Config, tsrange, "tsrange('2008-01-02 03:04:05', '2008-02-02 03:04:05', '[)')", {{{2008,1,2},{3,4,5.0}}, {{2008,2,2},{3,4,5.0}}}, []),
-        check_type(Config, tsrange, "tsrange('2008-01-02 03:04:05', '2008-02-02 03:04:05', '(]')", {{{2008,1,2},{3,4,5.0}}, {{2008,2,2},{3,4,5.0}}}, []),
-        check_type(Config, tsrange, "tsrange('2008-01-02 03:04:05', '2008-01-02 03:04:05')", empty, []),
-        check_type(Config, daterange, "daterange('2008-01-02', '2008-02-02')", {{2008,1,2}, {2008, 2, 2}}, [{{-4712,1,1}, {5874897,1,1}}]),
-        check_type(Config, tstzrange, "tstzrange('2011-01-02 03:04:05+3', '2011-01-02 04:04:05+3')", {{{2011, 1, 2}, {0, 4, 5.0}}, {{2011, 1, 2}, {1, 4, 5.0}}}, [{{{2011, 1, 2}, {0, 4, 5.0}}, {{2011, 1, 2}, {1, 4, 5.0}}}]),
-        check_type(Config, tstzrange, "tstzrange('2008-01-02 03:04:05', null)", {{{2008,1,2},{3,4,5.0}}, plus_infinity}, []),
-        check_type(Config, tstzrange, "tstzrange('2008-01-02 03:04:05', null, '[]')", {{{2008,1,2},{3,4,5.0}}, plus_infinity}, []),
-        check_type(Config, tstzrange, "tstzrange('2008-01-02 03:04:05', null, '()')", {{{2008,1,2},{3,4,5.0}}, plus_infinity}, []),
-        check_type(Config, tstzrange, "tstzrange(null, '2008-01-02 03:04:05')", {minus_infinity, {{2008,1,2},{3,4,5.0}}}, []),
-        check_type(Config, tstzrange, "tstzrange(null, '2008-01-02 03:04:05', '[]')", {minus_infinity, {{2008,1,2},{3,4,5.0}}}, []),
-        check_type(Config, tstzrange, "tstzrange(null, '2008-01-02 03:04:05', '()')", {minus_infinity, {{2008,1,2},{3,4,5.0}}}, [])
+       check_type(Config, tsrange, "tsrange('2008-01-02 03:04:05', '2008-01-02 03:04:05')", empty, []),
+
+       check_type(Config, daterange, "daterange('2008-01-02', '2008-02-02')", {{2008,1,2}, {2008, 2, 2}}, [{{-4712,1,1}, {5874897,1,1}}
+]),
+      check_type(Config, tstzrange, "tstzrange('2011-01-02 03:04:05+3', '2011-01-02 04:04:05+3')", {{{2011, 1, 2}, {0, 4, 5.0}}, {{2011, 1, 2}, {1, 4, 5.0}}}, [{{{2011, 1, 2}, {0, 4, 5.0}}, {{2011, 1, 2}, {1, 4, 5.0}}}])
 
    end, []).
 
@@ -1525,251 +1172,36 @@ with_transaction(Config) ->
                    C, fun(_) -> error(my_err) end, []))
       end, []).
 
-%% @doc Mixing all 3 API interfaces with same connection
-mixed_api(Config) ->
-    epgsql = ?config(module, Config),
-    epgsql_ct:with_connection(
-      Config,
-      fun(C) ->
-              {ok, Stmt} = epgsql:parse(
-                             C, "SELECT id, $1::text AS val FROM generate_series(1, 5) AS t(id)"),
-              ABindRef = epgsqla:bind(C, Stmt, "a_portal", [<<"epgsqla">>]),
-              IBindRef = epgsqli:bind(C, Stmt, "i_portal", [<<"epgsqli">>]),
-              AExecute1Ref = epgsqla:execute(C, Stmt, "a_portal", 3),
-              IExecute1Ref = epgsqli:execute(C, Stmt, "i_portal", 3),
-              ?assertEqual({partial, [{4, <<"epgsqla">>}]},
-                           epgsql:execute(C, Stmt, "a_portal", 1)),
-              ?assertEqual({partial, [{4, <<"epgsqli">>}]},
-                           epgsql:execute(C, Stmt, "i_portal", 1)),
-              %% by the time epgsql:execute returns, we should already have all the asynchronous
-              %% responses in our message queue (epgsql:execute uses selective receive),
-              %% but let's try to run some more finalizers.
-              %% Note: we are calling epgsqla on i_portal and epgsqli on a_portal!
-              AExecute2Ref = epgsqla:execute(C, Stmt, "i_portal", 0),
-              IExecute2Ref = epgsqli:execute(C, Stmt, "a_portal", 0),
-              ok = epgsql:close(C, Stmt),
-              ?assertEqual(
-                 [{C, ABindRef, ok},
-                  {C, IBindRef, ok},
-                  {C, AExecute1Ref, {partial, [{1, <<"epgsqla">>},
-                                               {2, <<"epgsqla">>},
-                                               {3, <<"epgsqla">>}
-                                              ]}},
-                  {C, IExecute1Ref, {data, {1, <<"epgsqli">>}}},
-                  {C, IExecute1Ref, {data, {2, <<"epgsqli">>}}},
-                  {C, IExecute1Ref, {data, {3, <<"epgsqli">>}}},
-                  {C, IExecute1Ref, suspended},
-                  {C, AExecute2Ref, {ok, [{5, <<"epgsqli">>}]}},
-                  {C, IExecute2Ref, {data, {5, <<"epgsqla">>}}},
-                  {C, IExecute2Ref, {complete, select}}],
-                 receive_for_conn(C, 10, 1000))
-      end).
-
-pipelined_prepared_query(Config) ->
-    epgsql_cast = ?config(module, Config),
-    epgsql_ct:with_connection(
-      Config,
-      fun(C) ->
-              {ok, #statement{types = Types} = Stmt} =
-                  epgsql_cast:parse(C, "SELECT $1::integer as c1, 'hello' as c2"),
-              Refs = [{epgsqla:prepared_query(C, Stmt, lists:zip(Types, [I])), I}
-                      || I <- lists:seq(1, 10)],
-              Timer = erlang:send_after(5000, self(), timeout),
-              [receive
-                   {C, Ref, {ok, Columns, Rows}} ->
-                       ?assertMatch([#column{name = <<"c1">>, type = int4},
-                                     #column{name = <<"c2">>, type = text}], Columns),
-                       ?assertEqual([{I, <<"hello">>}], Rows);
-                   Other ->
-                       %% We expect responses in the same order as we send requests
-                       error({unexpected_message, Other})
-               end || {Ref, I} <- Refs],
-              erlang:cancel_timer(Timer)
-      end).
-
-pipelined_parse_batch_execute(Config) ->
-    epgsql_cast = ?config(module, Config),
-    epgsql_ct:with_connection(
-      Config,
-      fun(C) ->
-              ParseRefs =
-                  [begin
-                       Name = io_lib:format("stmt_~w", [I]),
-                       {epgsqla:parse(C, Name,
-                                      io_lib:format("SELECT $1 AS in, ~w00 AS out", [I]),
-                                      [int4]),
-                        I}
-                   end || I <- lists:seq(1, 5)],
-              Timer = erlang:send_after(5000, self(), timeout),
-              Batch =
-                  [receive
-                       {C, Ref, {ok, #statement{columns = Cols} = Stmt}} ->
-                           ?assertMatch([#column{name = <<"in">>, type = int4},
-                                         #column{name = <<"out">>}],
-                                        Cols),
-                           {Stmt, [I]};
-                       Other ->
-                           error({unexpected_message, Other})
-                   end || {Ref, I} <- ParseRefs],
-              ?assertMatch([{ok, [{1, 100}]},
-                            {ok, [{2, 200}]},
-                            {ok, [{3, 300}]},
-                            {ok, [{4, 400}]},
-                            {ok, [{5, 500}]}],
-                           epgsql:execute_batch(C, Batch)),
-              CloseRefs = [epgsqla:close(C, Stmt) || {Stmt, _} <- Batch],
-              [receive
-                   {C, Ref, ok} ->
-                       ok;
-                   Other ->
-                       error({unexpected_message, Other})
-               end || Ref <- CloseRefs],
-              erlang:cancel_timer(Timer)
-      end).
-
-incremental_sock_active_n(Config) ->
-    epgsql_incremental = ?config(module, Config),
-    Q = "SELECT *, 'Hello world' FROM generate_series(0, 10240)",
-    epgsql_ct:with_connection(Config,
-         fun(C) ->
-             Ref = epgsqli:squery(C, Q),
-             {done, NumPassive, Others, Rows} = recv_incremental_active_n(C, Ref),
-             ?assertMatch([{columns, _}, {complete, _}], Others),
-             ?assert(NumPassive > 0),
-             ?assertMatch([{<<"0">>, <<"Hello world">>},
-                           {<<"1">>, <<"Hello world">>} | _], Rows),
-             ?assertEqual(10241, length(Rows))
-         end,
-         "epgsql_test",
-         [{socket_active, 2}]).
-
--ifdef(OTP_RELEASE).
-incremental_sock_active_n_ssl(Config) ->
-    epgsql_incremental = ?config(module, Config),
-    Q = "SELECT *, 'Hello world' FROM generate_series(0, 10240)",
-    epgsql_ct:with_connection(Config,
-         fun(C) ->
-             Ref = epgsqli:squery(C, Q),
-             {done, NumPassive, Others, Rows} = recv_incremental_active_n(C, Ref),
-             ?assertMatch([{columns, _}, {complete, _}], Others),
-             ?assert(NumPassive > 0),
-             ?assertMatch([{<<"0">>, <<"Hello world">>},
-                           {<<"1">>, <<"Hello world">>} | _], Rows),
-             ?assertEqual(10241, length(Rows))
-         end,
-         "epgsql_test",
-         [{ssl, true}, {ssl_opts, [{verify, verify_none}]}, {socket_active, 2}]).
--else.
-%% {active, N} for SSL is only supported on OTP-21+
-incremental_sock_active_n_ssl(_Config) ->
-    noop.
--endif.
-
-recv_incremental_active_n(C, Ref) ->
-    recv_incremental_active_n(C, Ref, 0, [], []).
-
-recv_incremental_active_n(C, Ref, NumPassive, Rows, Others) ->
-    receive
-        {C, Ref, {data, Row}} ->
-            recv_incremental_active_n(C, Ref, NumPassive, [Row | Rows], Others);
-        {epgsql, C, socket_passive} ->
-            ok = epgsql:activate(C),
-            recv_incremental_active_n(C, Ref, NumPassive + 1, Rows, Others);
-        {C, Ref, {error, _} = E} ->
-            E;
-        {C, Ref, done} ->
-            {done, NumPassive, lists:reverse(Others), lists:reverse(Rows)};
-        {C, Ref, Other} ->
-            recv_incremental_active_n(C, Ref, NumPassive, Rows, [Other | Others]);
-        Other ->
-            recv_incremental_active_n(C, Ref, NumPassive, Rows, [Other | Others])
-    after 5000 ->
-            error({timeout, NumPassive, Others, Rows})
-    end.
-
-redacted_state(Config) ->
-    case erlang:system_info(otp_release) of
-      V = [_, _] when V > "20" ->
-        redacted_state_(Config);
-      V ->
-        {skip, {"Logger facility is available starting OTP 21, running on OTP " ++ V}}
-    end.
-
-redacted_state_(Config) ->
-    _Handle = ct:timetrap({seconds, 3}),
-    try
-      logger:add_handler(?MODULE, ?MODULE, #{relay_to => self()}),
-      C = epgsql_ct:connect(Config),
-      true = unlink(C),
-      Reason = {please, ?MODULE, ?FUNCTION_NAME},
-      ok = proc_lib:stop(C, Reason, 1000),
-      receive
-        {log, Message} ->
-            ?assertMatch({report, #{label := {gen_server, terminate},
-                                    reason := Reason,
-                                    state := _}},
-                         Message),
-            {report, #{state := State}} = Message,
-            ?assertMatch(#{rows := information_redacted},
-                         epgsql_sock:state_to_map(State))
-      end
-    after
-      logger:remove_handler(?MODULE)
-    end.
-
-%% =============================================================================
-%% Logger handler
-%% ============================================================================
-
-log(#{msg := Msg}, #{relay_to := Pid}) ->
-    Pid ! {log, Msg};
-log(_, _) ->
-    ok.
-
 %% =============================================================================
 %% Internal functions
 %% ============================================================================
 
-receive_for_conn(_, 0, _) -> [];
-receive_for_conn(C, N, Timeout) ->
-    receive
-        {C, _, _} = Msg ->
-            [Msg | receive_for_conn(C, N - 1, Timeout)];
-        Other ->
-            error({unexpected_msg, Other})
-    after Timeout ->
-            error({timeout, {remaining_msgs, N}})
-    end.
-
-get_type_col(Type) ->
-    "c_" ++ atom_to_list(Type).
-
 check_type(Config, Type, In, Out, Values) ->
-    Column = get_type_col(Type),
+    Column = "c_" ++ atom_to_list(Type),
     check_type(Config, Type, In, Out, Values, Column).
 
 check_type(Config, Type, In, Out, Values, Column) ->
-    epgsql_ct:with_connection(Config, fun(C) ->
-        check_type(Config, Type, In, Out, Values, Column, C)
-    end).
-
-check_type(Config, Type, In, Out, Values, Column, C) ->
     Module = ?config(module, Config),
-    Select = io_lib:format("select ~s::~w", [In, Type]),
-    Res = Module:equery(C, Select),
-    ?assertMatch({ok, [#column{type = Type}], [{Out}]}, Res),
-    Sql = io_lib:format("insert into test_table2 (~s) values ($1) returning ~s", [Column, Column]),
-    {ok, #statement{columns = [#column{type = Type}]} = S} = Module:parse(C, Sql),
-    Insert = fun(V) ->
-        ok = Module:bind(C, S, [V]),
-        {ok, 1, [{V2}]} = Module:execute(C, S),
-        case compare(Type, V, V2) of
-            true  -> ok;
-            false -> error({write_read_compare_failed, io_lib:format("~p =/= ~p", [V, V2])})
+    epgsql_ct:with_connection(Config, fun(C) ->
+        Select = io_lib:format("select ~s::~w", [In, Type]),
+        Res = Module:equery(C, Select),
+        ?assertMatch({ok, [#column{type = Type}], [{Out}]}, Res),
+        Sql = io_lib:format("insert into test_table2 (~s) values ($1) returning ~s", [Column, Column]),
+        {ok, #statement{columns = [#column{type = Type}]} = S} = Module:parse(C, Sql),
+        Insert = fun(V) ->
+            ok = Module:bind(C, S, [V]),
+            {ok, 1, [{V2}]} = Module:execute(C, S),
+            case compare(Type, V, V2) of
+                true  -> ok;
+                false ->
+                    error({write_read_compare_failed,
+                           iolist_to_binary(
+                             io_lib:format("~p =/= ~p~n", [V, V2]))})
+            end,
+            ok = Module:sync(C)
         end,
-        ok = Module:sync(C)
-    end,
-    lists:foreach(Insert, [null, undefined | Values]).
+        lists:foreach(Insert, [null, undefined | Values])
+    end).
 
 compare(_Type, null, null)      -> true;
 compare(_Type, undefined, null) -> true;

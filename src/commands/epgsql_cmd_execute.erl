@@ -1,14 +1,6 @@
-%% @doc Executes a portal.
-%%
-%% It's possible to tell the server to only return limited number of rows by
-%% providing non-zero `MaxRows' parameter.
-%% ```
 %% > Execute
 %% < DataRow*
 %% < CommandComplete | PortalSuspended
-%% '''
-%% @see epgsql_cmd_parse
-%% @see epgsql_cmd_bind
 -module(epgsql_cmd_execute).
 -behaviour(epgsql_command).
 -export([init/1, execute/2, handle_message/4]).
@@ -32,15 +24,16 @@ init({Stmt, PortalName, MaxRows}) ->
     #execute{stmt = Stmt, portal_name = PortalName, max_rows = MaxRows}.
 
 execute(Sock, #execute{stmt = Stmt, portal_name = PortalName, max_rows = MaxRows} = State) ->
+    epgsql_sock:send_multi(
+      Sock,
+      [
+       {?EXECUTE, [PortalName, 0, <<MaxRows:?int32>>]},
+       {?FLUSH, []}
+      ]),
     #statement{columns = Columns} = Stmt,
     Codec = epgsql_sock:get_codec(Sock),
     Decoder = epgsql_wire:build_decoder(Columns, Codec),
-    Commands =
-      [
-       epgsql_wire:encode_execute(PortalName, MaxRows),
-       epgsql_wire:encode_flush()
-      ],
-    {send_multi, Commands, Sock, State#execute{decoder = Decoder}}.
+    {ok, Sock, State#execute{decoder = Decoder}}.
 
 handle_message(?DATA_ROW, <<_Count:?int16, Bin/binary>>, Sock,
                #execute{decoder = Decoder} = St) ->

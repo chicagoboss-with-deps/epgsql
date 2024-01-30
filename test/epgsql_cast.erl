@@ -6,11 +6,10 @@
 -module(epgsql_cast).
 
 -export([connect/1, connect/2, connect/3, connect/4, close/1]).
--export([get_parameter/2, set_notice_receiver/2, get_cmd_status/1, get_backend_pid/1,
-         squery/2, equery/2, equery/3]).
+-export([get_parameter/2, set_notice_receiver/2, get_cmd_status/1, squery/2, equery/2, equery/3]).
 -export([prepared_query/3]).
 -export([parse/2, parse/3, parse/4, describe/2, describe/3]).
--export([bind/3, bind/4, execute/2, execute/3, execute/4, execute_batch/2, execute_batch/3]).
+-export([bind/3, bind/4, execute/2, execute/3, execute/4, execute_batch/2]).
 -export([close/2, close/3, sync/1]).
 -export([receive_result/2, sync_on_error/2]).
 
@@ -59,9 +58,6 @@ set_notice_receiver(C, PidOrName) ->
 get_cmd_status(C) ->
     epgsqla:get_cmd_status(C).
 
-get_backend_pid(C) ->
-    epgsqla:get_backend_pid(C).
-
 squery(C, Sql) ->
     Ref = epgsqla:squery(C, Sql),
     receive_result(C, Ref).
@@ -80,14 +76,12 @@ equery(C, Sql, Parameters) ->
             Error
     end.
 
-prepared_query(C, #statement{types = Types} = Stmt, Parameters) ->
-    TypedParameters = lists:zip(Types, Parameters),
-    Ref = epgsqla:prepared_query(C, Stmt, TypedParameters),
-    receive_result(C, Ref);
 prepared_query(C, Name, Parameters) ->
     case describe(C, statement, Name) of
-        {ok, S} ->
-            prepared_query(C, S, Parameters);
+        {ok, #statement{types = Types} = S} ->
+            Typed_Parameters = lists:zip(Types, Parameters),
+            Ref = epgsqla:prepared_query(C, S, Typed_Parameters),
+            receive_result(C, Ref);
         Error ->
             Error
     end.
@@ -128,17 +122,6 @@ execute(C, S, PortalName, N) ->
 execute_batch(C, Batch) ->
     Ref = epgsqla:execute_batch(C, Batch),
     receive_result(C, Ref).
-
-execute_batch(C, #statement{columns = Cols} = Stmt, Batch) ->
-    Ref = epgsqla:execute_batch(C, Stmt, Batch),
-    {Cols, receive_result(C, Ref)};
-execute_batch(C, Sql, Batch) ->
-    case parse(C, Sql) of
-        {ok, #statement{} = S} ->
-            execute_batch(C, S, Batch);
-        Error ->
-            Error
-    end.
 
 %% statement/portal functions
 

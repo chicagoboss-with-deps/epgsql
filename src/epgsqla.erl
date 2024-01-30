@@ -1,10 +1,3 @@
-%%% @doc
-%%% Asynchronous interface.
-%%%
-%%% All the functions return `reference()' immediately. Results are delivered
-%%% asynchronously in a form of `{connection(), reference(), Result}', where
-%%% `Result' is what synchronous version of this function normally returns.
-%%% @end
 %%% Copyright (C) 2011 - Anton Lebedevich.  All rights reserved.
 
 -module(epgsqla).
@@ -15,7 +8,6 @@
          get_parameter/2,
          set_notice_receiver/2,
          get_cmd_status/1,
-         get_backend_pid/1,
          squery/2,
          equery/2, equery/3,
          prepared_query/3,
@@ -23,7 +15,7 @@
          describe/2, describe/3,
          bind/3, bind/4,
          execute/2, execute/3, execute/4,
-         execute_batch/2, execute_batch/3,
+         execute_batch/2,
          close/2, close/3,
          sync/1,
          cancel/1,
@@ -60,8 +52,8 @@ connect(C, Host, Username, Password, Opts) ->
     call_connect(C, Opts1).
 
 -spec call_connect(epgsql:connection(), epgsql:connect_opts()) -> reference().
-call_connect(C, Opts) ->
-    Opts1 = epgsql_cmd_connect:opts_hide_password(epgsql:to_map(Opts)),
+call_connect(C, Opts) when is_map(Opts) ->
+    Opts1 = epgsql_cmd_connect:opts_hide_password(Opts),
     complete_connect(
       C, cast(C, epgsql_cmd_connect, Opts1), Opts1).
 
@@ -84,10 +76,6 @@ set_notice_receiver(C, PidOrName) ->
       Status :: undefined | atom() | {atom(), integer()}.
 get_cmd_status(C) ->
     epgsql_sock:get_cmd_status(C).
-
--spec get_backend_pid(epgsql:connection()) -> integer().
-get_backend_pid(C) ->
-    epgsql_sock:get_backend_pid(C).
 
 -spec squery(epgsql:connection(), epgsql:sql_query()) -> reference().
 squery(C, Sql) ->
@@ -134,10 +122,6 @@ execute(C, Statement, PortalName, MaxRows) ->
 -spec execute_batch(epgsql:connection(), [{epgsql:statement(), [epgsql:bind_param()]}]) -> reference().
 execute_batch(C, Batch) ->
     cast(C, epgsql_cmd_batch, Batch).
-
--spec execute_batch(epgsql:connection(), epgsql:statement(), [ [epgsql:bind_param()] ]) -> reference().
-execute_batch(C, #statement{} = Statement, Batch) ->
-    cast(C, epgsql_cmd_batch, {Statement, Batch}).
 
 describe(C, #statement{name = Name}) ->
     describe(C, statement, Name).

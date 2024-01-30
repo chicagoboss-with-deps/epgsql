@@ -1,12 +1,7 @@
 %%% @doc
 %%% Codec for `int4range', `int8range' types.
-%%%
-%%% <ul>
-%%%   <li>[https://www.postgresql.org/docs/current/static/rangetypes.html#rangetypes-builtin]</li>
-%%%   <li>$PG$/src/backend/utils/adt/rangetypes.c</li>
-%%% </ul>
-%%% @end
-%%% @see epgsql_codec_integer
+%%% https://www.postgresql.org/docs/current/static/rangetypes.html#rangetypes-builtin
+%%% $PG$/src/backend/utils/adt/rangetypes.c
 %%% @end
 %%% Created : 14 Oct 2017 by Sergey Prokhorov <me@seriyps.ru>
 %%% TODO: universal range, based on pg_range table
@@ -21,7 +16,7 @@
 
 -export_type([data/0]).
 
--type data() :: {left(), right()} | empty.
+-type data() :: {left(), right()}.
 
 -type left() :: minus_infinity | integer().
 -type right() :: plus_infinity | integer().
@@ -32,15 +27,11 @@ init(_, _) -> [].
 names() ->
     [int4range, int8range].
 
-encode(empty, _, _) ->
-    <<1>>;
 encode(Range, int4range, _) ->
     encode_int4range(Range);
 encode(Range, int8range, _) ->
     encode_int8range(Range).
 
-decode(<<1>>, _, _) ->
-    empty;
 decode(Bin, int4range, _) ->
     decode_int4range(Bin);
 decode(Bin, int8range, _) ->
@@ -51,34 +42,26 @@ encode_int4range({minus_infinity, plus_infinity}) ->
     <<24:1/big-signed-unit:8>>;
 encode_int4range({From, plus_infinity}) ->
     FromInt = to_int(From),
-    epgsql_codec_integer:check_overflow_int(FromInt),
     <<18:1/big-signed-unit:8, 4:?int32, FromInt:?int32>>;
 encode_int4range({minus_infinity, To}) ->
     ToInt = to_int(To),
-    epgsql_codec_integer:check_overflow_int(ToInt),
     <<8:1/big-signed-unit:8, 4:?int32, ToInt:?int32>>;
 encode_int4range({From, To}) ->
     FromInt = to_int(From),
     ToInt = to_int(To),
-    epgsql_codec_integer:check_overflow_int(FromInt),
-    epgsql_codec_integer:check_overflow_int(ToInt),
     <<2:1/big-signed-unit:8, 4:?int32, FromInt:?int32, 4:?int32, ToInt:?int32>>.
 
 encode_int8range({minus_infinity, plus_infinity}) ->
     <<24:1/big-signed-unit:8>>;
 encode_int8range({From, plus_infinity}) ->
     FromInt = to_int(From),
-    epgsql_codec_integer:check_overflow_big(FromInt),
     <<18:1/big-signed-unit:8, 8:?int32, FromInt:?int64>>;
 encode_int8range({minus_infinity, To}) ->
     ToInt = to_int(To),
-    epgsql_codec_integer:check_overflow_big(ToInt),
     <<8:1/big-signed-unit:8, 8:?int32, ToInt:?int64>>;
 encode_int8range({From, To}) ->
     FromInt = to_int(From),
     ToInt = to_int(To),
-    epgsql_codec_integer:check_overflow_big(FromInt),
-    epgsql_codec_integer:check_overflow_big(ToInt),
     <<2:1/big-signed-unit:8, 8:?int32, FromInt:?int64, 8:?int32, ToInt:?int64>>.
 
 to_int(N) when is_integer(N) -> N;

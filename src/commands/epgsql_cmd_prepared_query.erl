@@ -1,7 +1,4 @@
-%% @doc Almost the same as equery, but don't execute 'CLOSE'
-%%
-%% So, statement can be reused multiple times.
-%% ```
+%% Almost the same as equery, but don't execute 'CLOSE'
 %% > Bind
 %% < BindComplete
 %% > Execute
@@ -9,7 +6,6 @@
 %% < CommandComplete
 %% > Sync
 %% < ReadyForQuery
-%% '''
 -module(epgsql_cmd_prepared_query).
 -behaviour(epgsql_command).
 -export([init/1, execute/2, handle_message/4]).
@@ -37,13 +33,14 @@ execute(Sock, #pquery{stmt = Stmt, params = TypedParams} = St) ->
     Codec = epgsql_sock:get_codec(Sock),
     Bin1 = epgsql_wire:encode_parameters(TypedParams, Codec),
     Bin2 = epgsql_wire:encode_formats(Columns),
-    Commands =
+    epgsql_sock:send_multi(
+      Sock,
       [
-       epgsql_wire:encode_bind("", StatementName, Bin1, Bin2),
-       epgsql_wire:encode_execute("", 0),
-       epgsql_wire:encode_sync()
-      ],
-    {send_multi, Commands, Sock, St}.
+       {?BIND, ["", 0, StatementName, 0, Bin1, Bin2]},
+       {?EXECUTE, ["", 0, <<0:?int32>>]},
+       {?SYNC, []}
+      ]),
+    {ok, Sock, St}.
 
 handle_message(?BIND_COMPLETE, <<>>, Sock, #pquery{stmt = Stmt} = State) ->
     #statement{columns = Columns} = Stmt,

@@ -1,16 +1,9 @@
 %%% @doc
 %%% Codec for `time', `timetz', `date', `timestamp', `timestamptz', `interval'
-%%%
-%%% It supports both integer and float datetime representations (see
-%%% [https://www.postgresql.org/docs/current/runtime-config-preset.html#GUC-INTEGER-DATETIMES]).
-%%% But float representation support might be eventually removed.
-%%%
-%%% <ul>
-%%%  <li>[https://www.postgresql.org/docs/current/static/datatype-datetime.html]</li>
-%%%  <li>$PG$/src/backend/utils/adt/timestamp.c // `timestamp', `timestamptz', `interval'</li>
-%%%  <li>$PG$/src/backend/utils/adt/datetime.c // helpers</li>
-%%%  <li>$PG$/src/backend/utils/adt/date.c // `time', `timetz', `date'</li>
-%%% </ul>
+%%% https://www.postgresql.org/docs/current/static/datatype-datetime.html
+%%% $PG$/src/backend/utils/adt/timestamp.c // `timestamp', `timestamptz', `interval'
+%%% $PG$/src/backend/utils/adt/datetime.c // helpers
+%%% $PG$/src/backend/utils/adt/date.c // `time', `timetz', `date'
 %%% @end
 %%% Created : 12 Oct 2017 by Sergey Prokhorov <me@seriyps.ru>
 

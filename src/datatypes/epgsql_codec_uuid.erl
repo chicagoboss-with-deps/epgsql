@@ -1,12 +1,9 @@
 %%% @doc
 %%% Codec for `uuid' type.
-%%%
-%%% Input is expected to be in hex `string()' / `binary()', eg
+%%% Input expected to be in hex string, eg
 %%% `<<"550e8400-e29b-41d4-a716-446655440000">>'.
-%%% <ul>
-%%%  <li>[https://www.postgresql.org/docs/current/static/datatype-uuid.html]</li>
-%%%  <li>$PG$/src/backend/utils/adt/uuid.c</li>
-%%% </ul>
+%%% https://www.postgresql.org/docs/current/static/datatype-uuid.html
+%%% $PG$/src/backend/utils/adt/uuid.c
 %%% @end
 %%% Created : 14 Oct 2017 by Sergey Prokhorov <me@seriyps.ru>
 

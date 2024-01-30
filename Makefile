@@ -1,40 +1,27 @@
-REBAR = rebar3
-MINIMAL_COVERAGE = 55
+REBAR = ./rebar3
 
 all: compile
 
-compile: src/epgsql_errcodes.erl
+$(REBAR):
+	wget https://s3.amazonaws.com/rebar3/rebar3
+	chmod +x rebar3
+
+compile: src/epgsql_errcodes.erl $(REBAR)
 	@$(REBAR) compile
 
-clean:
+clean: $(REBAR)
 	@$(REBAR) clean
-	@rm -f doc/*.html
-	@rm -f doc/erlang.png
-	@rm -f doc/stylesheet.css
-	@rm -f doc/edoc-info
 
 src/epgsql_errcodes.erl:
 	./generate_errcodes_src.sh > src/epgsql_errcodes.erl
 
-common-test:
-	$(REBAR) ct --readable true -c
-
-eunit:
-	$(REBAR) eunit -c
-
-# Fail the build if coverage falls below 55%
-cover:
-	$(REBAR) cover -v --min_coverage $(MINIMAL_COVERAGE)
-
-test: compile eunit common-test cover
+test: compile
+	@$(REBAR) do ct -v
 
 dialyzer: compile
 	@$(REBAR) dialyzer
 
-elvis:
+elvis: $(REBAR)
 	@$(REBAR) as lint lint
 
-edoc:
-	@$(REBAR) edoc
-
-.PHONY: all compile clean common-test eunit cover test dialyzer elvis
+.PHONY: all compile clean test dialyzer elvis

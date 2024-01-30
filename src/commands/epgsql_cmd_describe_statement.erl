@@ -1,12 +1,7 @@
-%% @doc Asks server to provide input parameter and result rows information.
-%%
-%% Almost the same as {@link epgsql_cmd_parse}.
-%%
-%% ```
-%% > Describe(STATEMENT)
+%% Almost the same as "parse"
+%% > Describe
 %% < ParameterDescription
 %% < RowDescription | NoData
-%% '''
 -module(epgsql_cmd_describe_statement).
 -behaviour(epgsql_command).
 -export([init/1, execute/2, handle_message/4]).
@@ -26,12 +21,13 @@ init(Name) ->
     #desc_stmt{name = Name}.
 
 execute(Sock, #desc_stmt{name = Name} = St) ->
-    Commands =
+    epgsql_sock:send_multi(
+      Sock,
       [
-       epgsql_wire:encode_describe(statement, Name),
-       epgsql_wire:encode_flush()
-      ],
-    {send_multi, Commands, Sock, St}.
+       {?DESCRIBE, [?PREPARED_STATEMENT, Name, 0]},
+       {?FLUSH, []}
+      ]),
+    {ok, Sock, St}.
 
 handle_message(?PARAMETER_DESCRIPTION, Bin, Sock, State) ->
     Codec = epgsql_sock:get_codec(Sock),

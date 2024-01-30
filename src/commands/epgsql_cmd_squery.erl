@@ -1,10 +1,4 @@
-%% @doc Executes SQL query(es) using
-%% <a href="https://www.postgresql.org/docs/current/protocol-flow.html#id-1.10.5.7.4">
-%% simple query protocol</a>
-%%
-%% Squery can not have placeholders.
 %% Squery may contain many semicolon-separated queries
-%% ```
 %% > Query
 %% < (RowDescription?
 %% <  DataRow*
@@ -14,7 +8,6 @@
 %% > Query when len(strip(Query)) == 0
 %% < EmptyQueryResponse
 %% < ReadyForQuery
-%% '''
 -module(epgsql_cmd_squery).
 -behaviour(epgsql_command).
 -export([init/1, execute/2, handle_message/4]).
@@ -32,14 +25,14 @@
 -record(squery,
         {query :: iodata(),
          columns = [],
-         decoder = undefined :: epgsql_wire:row_decoder() | undefined}).
+         decoder}).
 
 init(Sql) ->
     #squery{query = Sql}.
 
 execute(Sock, #squery{query = Q} = State) ->
-    {Type, Data} = epgsql_wire:encode_query(Q),
-    {send, Type, Data, Sock, State}.
+    epgsql_sock:send(Sock, ?SIMPLEQUERY, [Q, 0]),
+    {ok, Sock, State}.
 
 handle_message(?ROW_DESCRIPTION, <<Count:?int16, Bin/binary>>, Sock, State) ->
     Codec = epgsql_sock:get_codec(Sock),
@@ -63,8 +56,7 @@ handle_message(?COMMAND_COMPLETE, Bin, Sock, #squery{columns = Cols} = St) ->
                  _ ->
                      {ok, Cols, Rows}
              end,
-    {add_result, Result, {complete, Complete}, Sock, St#squery{columns = [],
-                                                               decoder = undefined}};
+    {add_result, Result, {complete, Complete}, Sock, St};
 handle_message(?EMPTY_QUERY, _, Sock, St) ->
     {add_result, {ok, [], []}, {complete, empty}, Sock, St};
 handle_message(?READY_FOR_QUERY, _Status, Sock, _State) ->

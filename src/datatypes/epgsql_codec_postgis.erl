@@ -1,14 +1,7 @@
 %%% @doc
 %%% Codec for `geometry' PostGIS umbrella datatype.
-%%%
-%%% XXX: PostGIS is not a Postgres's built-in datatype! It should be installed
-%%% separately and enabled via `CREATE EXTENSION postgis'.
-%%% <ul>
-%%%  <li>[http://postgis.net/docs/manual-2.4/geometry.html]</li>
-%%%  <li>$POSTGIS$/postgis/lwgeom_inout.c</li>
-%%% </ul>
-%%% @end
-%%% @see ewkb
+%%% http://postgis.net/docs/manual-2.4/geometry.html
+%%% $POSTGIS$/postgis/lwgeom_inout.c
 %%% @end
 %%% Created : 14 Oct 2017 by Sergey Prokhorov <me@seriyps.ru>
 

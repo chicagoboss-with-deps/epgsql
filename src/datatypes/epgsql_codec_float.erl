@@ -1,10 +1,7 @@
 %%% @doc
 %%% Codec for `float4', `float8' (real, double precision).
-%%%
-%%% <ul>
-%%%  <li>[https://www.postgresql.org/docs/current/static/datatype-numeric.html#datatype-float]</li>
-%%%  <li>$PG$/src/backend/utils/adt/float.c</li>
-%%% </ul>
+%%% https://www.postgresql.org/docs/current/static/datatype-numeric.html#datatype-float
+%%% $PG$/src/backend/utils/adt/float.c
 %%% @end
 %%% Created : 12 Oct 2017 by Sergey Prokhorov <me@seriyps.ru>
 
